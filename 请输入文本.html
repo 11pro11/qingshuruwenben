@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>凑企鹅 · 忠实复现</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a2a2a;
+            font-family: 'Segoe UI', 'Noto Sans CJK SC', system-ui, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 85vh;
+            background: #fef3e0;
+            border-radius: 2rem;
+            box-shadow: 0 20px 35px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: #2c4238;
+            padding: 1rem 1.5rem;
+            color: #fae67a;
+            border-bottom: 3px solid #e0b35a;
+        }
+        .chat-header h2 {
+            margin: 0;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .chat-header h2::before {
+            content: "🐧";
+            font-size: 1.8rem;
+        }
+        .status {
+            font-size: 0.7rem;
+            background: #1e2e28;
+            display: inline-block;
+            padding: 0.2rem 0.7rem;
+            border-radius: 20px;
+            margin-left: 1rem;
+            font-family: monospace;
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message {
+            display: flex;
+            max-width: 92%;
+        }
+        .user {
+            align-self: flex-end;
+        }
+        .bot {
+            align-self: flex-start;
+        }
+        .bubble {
+            padding: 8px 16px;
+            border-radius: 1.5rem;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-size: 0.95rem;
+        }
+        .user .bubble {
+            background: #2d6a5e;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        .bot .bubble {
+            background: white;
+            border: 1px solid #e2cfaa;
+            color: #2d2a1f;
+            border-bottom-left-radius: 5px;
+        }
+        .empty-line {
+            height: 0.6rem;
+        }
+
+        .input-area {
+            background: #e7d7b0;
+            padding: 0.9rem 1.2rem;
+            display: flex;
+            gap: 12px;
+            border-top: 2px solid #ccae6e;
+        }
+        .input-area input {
+            flex: 1;
+            background: #fffcf0;
+            border: 2px solid #c2a05b;
+            border-radius: 3rem;
+            padding: 12px 18px;
+            font-size: 0.9rem;
+            outline: none;
+            font-family: inherit;
+        }
+        .input-area input:focus {
+            border-color: #9b6f3c;
+        }
+        .input-area button {
+            background: #5b4526;
+            border: none;
+            color: #ffe5b4;
+            font-weight: bold;
+            padding: 0 22px;
+            border-radius: 3rem;
+            font-family: monospace;
+            cursor: pointer;
+            transition: 0.05s linear;
+        }
+        .input-area button:active {
+            transform: scale(0.96);
+        }
+        button:disabled, input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="chat-header">
+        <h2>神人程序 · 何意味<span class="status">运行中</span></h2>
+        <div style="font-size:0.7rem;">输入「燃尽」终止</div>
+    </div>
+    <div class="messages" id="msgArea">
+        <div class="message bot">
+            <div class="bubble">谁给我吵醒了</div>
+        </div>
+    </div>
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="请输入文本..." autocomplete="off">
+        <button id="sendBtn">发送</button>
+    </div>
+</div>
+
+<script>
+    // ---------- 精确复刻随机与延时 ----------
+    function rand(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
+    }
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // DOM 元素
+    const msgContainer = document.getElementById('msgArea');
+    const inputEl = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    let active = true;          // 未被燃尽终止
+    let processing = false;
+
+    // 添加消息 (user/bot)
+    function addMsg(text, role, isBlank = false) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+        if (isBlank) {
+            div.classList.add('empty-line');
+            div.style.height = '0.6rem';
+            div.innerHTML = '';
+        } else {
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.textContent = text;
+            div.appendChild(bubble);
+        }
+        msgContainer.appendChild(div);
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+    }
+
+    // 执行带延迟的步骤序列
+    async function runSteps(steps) {
+        for (const step of steps) {
+            if (!active && step.force !== true) break;
+            if (step.text !== undefined) {
+                addMsg(step.text, 'bot');
+            } else if (step.isEmpty) {
+                addMsg('', 'bot', true);
+            }
+            if (step.delay > 0) await sleep(step.delay);
+        }
+    }
+
+    // 生成响应步骤（完全按照Python顺序、随机、延时）
+    function buildSteps(userText, randVals) {
+        const {
+            initPercent,    // 0-99
+            randBit,        // 0/1
+            junziIdx,       // 0-6
+            shenshouIdx,    // 0-3
+            fallbackRand    // 0-100
+        } = randVals;
+
+        const steps = [];
+        let countFlag = true;   // 对应python的count变量
+
+        // 辅助：添加文本行 (可选延时)
+        function addLine(txt, delayMs = 0) {
+            steps.push({ text: txt, delay: delayMs });
+        }
+        function addBlank(delayMs = 0) {
+            steps.push({ isEmpty: true, delay: delayMs });
+        }
+
+        // ---------- 1. 开头思考+空行+1秒 ----------
+        if (initPercent !== 0) addLine("思考中……");
+        else addLine("别吵，我在思考");
+        addBlank();
+        steps.push({ delay: 1000 });   // time.sleep(1)
+
+        // ---------- 条件判断 (严格按原顺序) ----------
+        // 燃尽
+        if (userText === '燃尽') {
+            addLine("厄啊！");
+            addBlank();
+        }
+
+        // 咕咕嘎嘎
+        if (userText.includes('咕咕嘎嘎')) {
+            countFlag = false;
+            addLine("你个凑企鹅！");
+            addBlank();
+            addLine("网上说说就算了，现实中谁还不想变成一只凑企鹅整天咕咕嘎嘎呢？", 500);
+            addBlank();
+        }
+
+        // 凑企鹅 + 你是谁
+        if (userText.includes('凑企鹅') && userText.includes('你是谁')) {
+            countFlag = false;
+            addLine("我是凑企鹅！咕咕嘎嘎！！");
+            addBlank();
+        }
+
+        // 这很神圣
+        if (userText.includes('这很神圣')) {
+            countFlag = false;
+            addLine("神圣你雷霆");
+            addBlank();
+        }
+
+        // 这很雷霆
+        if (userText.includes('这很雷霆')) {
+            countFlag = false;
+            addLine("雷霆你神圣");
+            addBlank();
+        }
+
+        // 原神
+        if (userText.includes('原神')) {
+            countFlag = false;
+            addLine("原神牛逼！");
+            addBlank();
+        }
+
+        // 那我问你
+        if (userText.includes('那我问你')) {
+            countFlag = false;
+            addLine("你的头顶怎么尖尖的");
+            addBlank();
+        }
+
+        // 帽子 (精确延迟)
+        if (userText.includes('帽子')) {
+            countFlag = false;
+            addLine("叛徒！特务！大军阀！反党分子，野心家！");
+            addLine("走资派，投降派，修正主义，大恶霸！", 100);
+            addLine("黑线人物，不革命！黑秀才，黑手，黑帮凶！", 500);
+            addLine("经济主义，民主派！中庸之道，变色龙！", 100);
+            addLine("绊脚石，墙头草，老好人，小修苗，造谣公司，传话筒，逆流，邪风，小爬虫！", 500);
+            addLine("资产阶级野心家！", 500);
+            addBlank();
+        }
+
+        // 使我
+        if (userText.includes('使我')) {
+            countFlag = false;
+            addLine("没用的，八重神子使我魅力无限。");
+            addBlank();
+        }
+
+        // 惹毛
+        if (userText.includes('惹毛')) {
+            countFlag = false;
+            addLine("谁又惹他了");
+            addBlank();
+        }
+
+        // 比比拉布 / 巴巴博一 / 八嘎呀路 / 我的刀盾 (不改变countFlag)
+        if (['比比拉布', '巴巴博一', '八嘎呀路', '我的刀盾'].includes(userText)) {
+            let out = '';
+            if (shenshouIdx === 0) out = '比比拉布';
+            else if (shenshouIdx === 1) out = '巴巴博一';
+            else if (shenshouIdx === 2) out = '八嘎呀路';
+            else out = '我的刀盾';
+            addLine(out);
+            addBlank();
+        }
+
+        // 呃啊/饿啊/额啊
+        if (/呃啊|饿啊|额啊/.test(userText)) {
+            countFlag = false;
+            addLine("饿就吃饭");
+            addBlank();
+        }
+
+        // 我要验牌
+        if (userText.includes('我要验牌')) {
+            countFlag = false;
+            addLine("小瘪三");
+            addLine("牌没有问题");
+            addBlank();
+        }
+
+        // 不会
+        if (userText.includes('不会')) {
+            countFlag = false;
+            addLine("去玩qq农场吧，你菜死了。");
+            addBlank();
+        }
+
+        // 心理委员 (严格延时: 首行后0.5s, 后续每行0.1s)
+        if (userText.includes('心理委员')) {
+            countFlag = false;
+            const lines = [
+                "心理委员提醒你",
+                "1. 不准从28楼肘击水泥地",
+                "2. 不可以去天台看看自己有没有隐形翅膀",
+                "3. 脖子不能跟房梁来场酣畅淋漓的拔河",
+                "4. 请不要用手腕跟刀片比硬度",
+                "5. 也不要去野湖练憋气三个小时",
+                "6. 不能躲在国道旁边，等大货车出来的时候吓他一跳",
+                "7. 禁止和高铁比比谁力气大",
+                "8. 拒绝喝确保庄稼正常生长的小饮料",
+                "9. 也不要去和鱼比肺活量",
+                "10. 别让手指和插座玩通电躲猫猫",
+                "11. 不准爬上阳台栏杆和晚风比平衡感",
+                "12. 不可以拿打火机跟窗帘来场火花派对",
+                "13. 拒绝让身体和滚烫的开水来次亲密拥抱",
+                "14. 不能让脑袋和墙壁比谁更坚硬",
+                "15. 别用舌头去舔冬天的铁门尝冰味",
+                "16. 不准把塑料袋套在头上模拟云朵包裹",
+                "17. 不可以从楼梯扶手滑下去体验极速漂流",
+                "18. 禁止让手腕和绳子来场缠绕比赛",
+                "19. 别让眼睛和尖锐的笔尖近距离对视",
+                "20. 拒绝用身体去撞行驶中的自行车测试缓冲力",
+                "21. 不能把异物塞进耳朵里给耳道装小装饰",
+                "22. 不准在马路上追逐打闹和汽车比反应快",
+                "23. 不可以拿剪刀对着自己练习精准裁剪",
+                "24. 别让喉咙和异物来场吞咽挑战赛",
+                "25. 禁止爬树爬到高处后模仿鸟儿往下跳",
+                "26. 拒绝让皮肤和强酸强碱友好握手",
+                "27. 不能用头去顶正在运行的风扇感受风的力量",
+                "28. 不准在结冰的湖面行走测试冰面承重",
+                "29. 不可以拿鞭炮在手里点燃看火花绽放",
+                "30. 别让身体和尖锐的玻璃碎片亲密接触",
+                "31. 禁止从窗户往外扔重物体验自由落体",
+                "32. 拒绝让牙齿去咬坚硬的金属锻炼咬合力",
+                "33. 不能在没有防护的情况下爬高墙挑战高度极限",
+                "34. 不准用湿手去碰电器开关给电流找通道",
+                "35. 不可以拿注射器给自己练习打针技巧",
+                "36. 别让身体和火焰跳贴身舞蹈",
+                "37. 禁止在铁轨上行走和火车比谁走得稳",
+                "38. 拒绝让眼睛直视强光测试视力耐力",
+                "39. 不能把农药当成饮料品尝特殊味道",
+                "40. 不准在楼梯上推搡打闹玩叠罗汉游戏",
+                "41. 不可以拿锤子对着自己的身体练习敲击节奏",
+                "42. 别让手指和剪刀的刀刃比谁更锋利",
+                "43. 禁止在雷雨天气站在大树下和雷电打招呼",
+                "44. 拒绝让身体和高速行驶的电动车相撞体验",
+                "45. 不能把绳子系在脖子上模拟项链装饰",
+                "46. 不准用舌头去舔化学试剂感受科学的味道",
+                "47. 不可以从高处往下扔自己体验飞翔的错觉",
+                "48. 别让身体和尖锐的铁钉亲密拥抱"
+            ];
+            addLine(lines[0], 0);
+            steps.push({ delay: 500 });  // time.sleep(0.5)
+            for (let i = 1; i < lines.length; i++) {
+                addLine(lines[i], 100);
+            }
+            addBlank();
+        }
+
+        // 魔丸 & 灵珠
+        if (userText.includes('魔丸') && userText.includes('灵珠')) {
+            countFlag = false;
+            addLine("藕饼99");
+            addBlank();
+        }
+
+        // 我操了老铁 / 卧槽了老铁
+        if (userText.includes('我操了老铁') || userText.includes('卧槽了老铁')) {
+            countFlag = false;
+            addLine("羡慕老铁");
+            addBlank();
+        }
+
+        // 急 / 又急
+        if (userText === '急' || userText.includes('又急')) {
+            countFlag = false;
+            addLine("你没急吧");
+            addBlank();
+        }
+
+        // 我喜欢你
+        if (userText === '我喜欢你') {
+            countFlag = false;
+            addLine("丑拒");
+            addBlank();
+        }
+
+        // 神在哪
+        if (userText === '神在哪') {
+            countFlag = false;
+            if (randBit === 0) addLine("神在人的前面");
+            else addLine("神在原的后面");
+            addBlank();
+        }
+
+        // 这期神了
+        if (userText === '这期神了') {
+            countFlag = false;
+            addLine("神在哪");
+            addBlank();
+        }
+
+        // 这期拉了 / 拉完了
+        if (userText === '这期拉了' || userText === '拉完了') {
+            countFlag = false;
+            addLine("拉在哪");
+            addBlank();
+        }
+
+        // 我发现
+        if (userText.includes('我发现')) {
+            countFlag = false;
+            addLine("我去不早说！");
+            addBlank();
+        }
+
+        // 全都是泡沫
+        if (userText === '全都是泡沫' || userText === '全都是泡沫~' || userText === '全都是泡沫！') {
+            countFlag = false;
+            addLine("只一刹的花火！");
+            addBlank();
+        }
+
+        // 何意味
+        if (userText.includes('何意味')) {
+            countFlag = false;
+            addLine("味意何");
+            addBlank();
+        }
+
+        // 吓哭了
+        if (userText.includes('吓哭了')) {
+            countFlag = false;
+            addLine("吓哭了");
+            addBlank();
+        }
+
+        // 怎么骂人呢
+        if (userText.includes('怎么骂人呢')) {
+            countFlag = false;
+            addLine("首先，我不骂人");
+            addLine("其次，你不是人");
+            addBlank();
+        }
+
+        // 威严/魏延/胃炎/围岩
+        if (['威严','魏延','胃炎','围岩'].some(kw => userText.includes(kw))) {
+            countFlag = false;
+            const wei = "势……魏延？\n蜀道艰险😨粮草如何运送🤔北伐空耗国力😔不如效仿东吴🤓五虎仅剩一人😭谁敢当北伐先锋🤔有何不敢😡既承先帝遗志😏怎能困守不前😡嗯嗯嗯~哈！！😡😡我！！😡魏延😡只进不退！！！😡😡若魏寇将十万之众延当为主公尽歼👊纵曹贼举天下进犯👊👊👊延亦可勠力拒退为主破敌👊😡😡👊如鱼饮水魏文长在此👋😂😂👊尔辈何敢乃尔！😡👊😡👊主公有延助力，何忧汉室难兴？此身搏杀不懈，只为成主公之业👊曹贼吴犬，我有何惧哉？😠我尚未全力一搏，又试问谁能阻挡？😡😡👊丞相无需多虑😡，我定能轻身立功";
+            addLine(wei);
+            addBlank();
+        }
+
+        // 赢/麻/乐/典/孝/绷 (随机六选一，但原版范围含“急”)
+        if (['赢','麻','乐','典','孝','绷'].some(kw => userText.includes(kw))) {
+            countFlag = false;
+            const map = ['急','赢','乐','麻','典','孝','绷'];
+            addLine(map[junziIdx % 7]);
+            addBlank();
+        }
+
+        // 米哈游/原神 且 鸣潮
+        if ((userText.includes('米哈游') || userText.includes('原神')) && userText.includes('鸣潮')) {
+            countFlag = false;
+            const block = "玩米哈游的：👍\n玩鸣潮的；👍\n引战的：🤬\n给我发片的：❤️";
+            block.split('\n').forEach(l => addLine(l));
+            addBlank();
+        }
+
+        // 6
+        if (userText === '6') {
+            countFlag = false;
+            addLine("呜呜呜你敷衍我");
+            addBlank();
+        }
+
+        // 别 (带空格布局)
+        if (userText === '别') {
+            countFlag = false;
+            let multi = "";
+            if (randBit === 0) {
+                multi = `逗
+你
+程
+序
+员
+哭
+了
+句号`;
+            } else {
+                multi = `逗
+你
+程
+序
+员
+笑
+了
+句号`;
+            }
+            multi.split('\n').forEach(l => addLine(l));
+            addBlank();
+        }
+
+        // ---------- 最终 fallback (countFlag 为 true 时) ----------
+        if (countFlag) {
+            if (fallbackRand !== 0) {
+                addLine("听不懂思密达");
+                addBlank();
+            } else {
+                // 1% 触发两种长文本
+                if (randBit === 0) {
+                    const rant = `md这sb程序员写这么一坨东西出来
+看不出对金钱的渴望纯报复社会
+看来人类文明凶多吉少了
+我真求你了
+地球要积八万丹了
+本来上班就烦
+看了源代码发现两嘉豪带着两福瑞来接我了
+什么这是牛头马面和黑白无常
+我去不早说
+算了你继续`;
+                    rant.split('\n').forEach(l => addLine(l));
+                } else {
+                    const cat = `我是猫娘我是猫娘我是猫娘我是猫娘我是猫娘
+呜呜呜要被玩坏了喵
+主人请尽情的调教我喵~`;
+                    cat.split('\n').forEach(l => addLine(l));
+                }
+                addBlank();
+            }
+        }
+
+        // 最后加一个空行 (模拟主循环中的 print())
+        addBlank();
+        return steps;
+    }
+
+    // 处理用户输入
+    async function onUserMessage() {
+        if (!active) {
+            addMsg("程序已燃尽。刷新页面重新开始。", "bot");
+            return;
+        }
+        if (processing) return;
+        const raw = inputEl.value.trim();
+        if (raw === "") return;
+
+        // 显示用户消息
+        addMsg(raw, "user");
+        inputEl.value = "";
+        processing = true;
+        sendBtn.disabled = true;
+        inputEl.disabled = true;
+
+        // 生成本次调用的全部随机数 (保证内部一致性)
+        const initRand = rand(0, 99);
+        const randBit = rand(0, 1);
+        const junziIdx = rand(0, 6);
+        const shenshouIdx = rand(0, 3);
+        const fallbackRand = rand(0, 100);
+
+        const steps = buildSteps(raw, {
+            initPercent: initRand,
+            randBit: randBit,
+            junziIdx: junziIdx,
+            shenshouIdx: shenshouIdx,
+            fallbackRand: fallbackRand
+        });
+
+        await runSteps(steps);
+
+        // 燃尽终止
+        if (raw === '燃尽') {
+            active = false;
+            addMsg("🔥 已燃尽。刷新页面可重新运行。", "bot");
+            sendBtn.disabled = true;
+            inputEl.disabled = true;
+            processing = false;
+            return;
+        }
+
+        processing = false;
+        sendBtn.disabled = false;
+        inputEl.disabled = false;
+        inputEl.focus();
+    }
+
+    // 绑定事件
+    sendBtn.addEventListener('click', onUserMessage);
+    inputEl.addEventListener('keypress', e => {
+        if (e.key === 'Enter' && !processing && active) {
+            e.preventDefault();
+            onUserMessage();
+        }
+    });
+    inputEl.focus();
+</script>
+</body>
+</html>
